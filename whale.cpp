@@ -1,7 +1,7 @@
 #include "whale.h"
 
-#include <stdio.h>
+#include <iostream>
 
 void WhaleInit() {
-    printf("Hello Whale!\n");
+    std::cout << "Hello Whale!\n";
 }

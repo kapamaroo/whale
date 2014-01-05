@@ -7,7 +7,7 @@ TARGET_LIB_LINKER_NAME = lib${NAME}.so
 TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
-CC = gcc
+CC = g++
 CFLAGS=-fPIC -Wall -g -UNDEBUG
 #CFLAGS=-fPIC -Wall -O3 -march=native -DNDEBUG
 LDFLAGS = -shared -Wl,-soname,$(TARGET_LIB_SONAME)
