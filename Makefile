@@ -81,4 +81,4 @@ clean:
 	-${RM} ${TARGET_LIB_LINKER_NAME} ${TARGET_LIB_SONAME} ${TARGET_LIB_REAL_NAME} ${OBJS} $(SRCS:.c=.d) test *~ core
 
 archive:
-	git archive --format=zip master -o whale.zip
+	git archive --format=zip master -o lib$(NAME)-$(VERSION).zip
