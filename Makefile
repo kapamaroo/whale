@@ -57,12 +57,6 @@ install:
 	mkdir -p $(INSTALL_DIR)/include/$(NAME)
 	cp $(HEADER_FILE) $(INSTALL_DIR)/include/$(NAME)
 
-# install library in subdirectory $(NAME)
-#	mkdir -p $(INSTALL_DIR)/lib/$(NAME)
-#	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib/$(NAME)
-#	cp -d $(TARGET_LIB_SONAME) $(INSTALL_DIR)/lib/$(NAME)
-#	cp -d $(TARGET_LIB_LINKER_NAME) $(INSTALL_DIR)/lib/$(NAME)
-
 # install library in lib/
 	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
 	cp -d $(TARGET_LIB_SONAME) $(INSTALL_DIR)/lib
@@ -70,8 +64,6 @@ install:
 
 uninstall:
 	rm -rf $(INSTALL_DIR)/include/$(NAME)
-
-#	rm -rf $(INSTALL_DIR)/lib/$(NAME)
 	rm -f $(INSTALL_DIR)/lib/$(TARGET_LIB_REAL_NAME)
 	rm -f $(INSTALL_DIR)/lib/$(TARGET_LIB_SONAME)
 	rm -f $(INSTALL_DIR)/lib/$(TARGET_LIB_LINKER_NAME)
