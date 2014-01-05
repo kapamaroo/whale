@@ -10,8 +10,9 @@ TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 CC = gcc
 CFLAGS = -Wall -g
 CXX = g++
-CXXFLAGS=-fPIC -Wall -g -UNDEBUG
-#CXXFLAGS=-fPIC -Wall -O3 -march=native -DNDEBUG
+COMMON_FLAGS = -fPIC -Wall -MP -MMD
+CXXFLAGS =$(COMMON_FLAGS) -g -UNDEBUG
+#CXXFLAGS =$(COMMON_FLAGS) -O3 -march=native -DNDEBUG
 LDFLAGS =-shared -Wl,-soname,$(TARGET_LIB_SONAME)
 RM = rm -f
 TEST_FILE = test.c
@@ -22,6 +23,8 @@ HEADER_FILE=whale.h
 DEPS = whale.h
 SRCS = whale.cpp
 OBJS = $(SRCS:.cpp=.o)
+
+-include $(SRCS:.cpp=.d)
 
 %.o: %.cpp $(DEPS)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
@@ -46,11 +49,6 @@ $(TARGET_LIB_SONAME): $(TARGET_LIB_REAL_NAME)
 $(TARGET_LIB_LINKER_NAME): $(TARGET_LIB_SONAME)
 #	ldconfig -v -n .
 	ln -sf $(TARGET_LIB_SONAME) $(TARGET_LIB_LINKER_NAME)
-
-$(SRCS:.cpp=.d):%.d:%.cpp
-	$(CXX) $(CXXFLAGS) -MM $< >$@
-
-include $(SRCS:.cpp=.d)
 
 .PHONY: all
 all: lib$(NAME) test
