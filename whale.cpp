@@ -2,6 +2,6 @@
 
 #include <iostream>
 
-void WhaleInit() {
+void WhaleInit(int argc, char *argv[]) {
     std::cout << "Hello Whale!\n";
 }

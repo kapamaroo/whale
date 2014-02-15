@@ -7,6 +7,6 @@
 #define WHALE_EXTERN extern
 #endif
 
-WHALE_EXTERN void WhaleInit();
+WHALE_EXTERN void WhaleInit(int argc, char *argv[]);
 
 #endif
