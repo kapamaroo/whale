@@ -1,6 +1,6 @@
 #include "whale.h"
 
 int main(int argc, char *argv[]) {
-    WhaleInit();
+    WhaleInit(argc,argv);
     return 0;
 }
