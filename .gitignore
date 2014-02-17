@@ -1,0 +1,8 @@
+.cproject
+.project
+
+*~
+*.so*
+*.o
+test
+whale.d
