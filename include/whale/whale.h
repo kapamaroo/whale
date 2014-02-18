@@ -3,6 +3,4 @@
 
 #include <whalesys.h>
 
-WHALE_EXTERN void WhaleInit(int argc, char *argv[]);
-
 #endif
