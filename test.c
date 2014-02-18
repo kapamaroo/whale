@@ -1,4 +1,4 @@
-#include "whale.h"
+#include <whale.h>
 
 int main(int argc, char *argv[]) {
     WhaleInit(argc,argv);
