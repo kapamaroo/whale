@@ -1,3 +1,5 @@
+DEBUG = 1
+
 MAJOR = 0
 MINOR = 1
 NAME = whale
@@ -7,18 +9,24 @@ TARGET_LIB_LINKER_NAME = lib${NAME}.so
 TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
+INSTALL_DIR=/opt/Work/FEniCS
+INCLUDE_DIR=./include/whale
+
 CC = gcc
-CFLAGS = -Wall -g
 CXX = g++
-COMMON_FLAGS = -fPIC -Wall -MP -MMD
-CXXFLAGS =$(COMMON_FLAGS) -g -UNDEBUG
-#CXXFLAGS =$(COMMON_FLAGS) -O3 -march=native -DNDEBUG
+CFLAGS = -Wall -g
+CXXFLAGS = -I$(INCLUDE_DIR) -fPIC -Wall -MP -MMD
+
+ifdef DEBUG
+CXXFLAGS += -g -UNDEBUG
+else
+CXXFLAGS += -O3 -march=native -DNDEBUG
+endif
+
 LDFLAGS =-shared -Wl,-soname,$(TARGET_LIB_SONAME)
+TEST_FLAGS = -Wall -g
 RM = rm -f
 TEST_FILE = test.c
-
-INSTALL_DIR=/opt/Work/FEniCS
-HEADER_FILE=whale.h
 
 DEPS = whale.h
 SRCS = whale.cpp
@@ -36,7 +44,7 @@ run-test:
 	LD_LIBRARY_PATH=. ./test
 
 test: lib$(NAME).so
-	$(CC) $(TEST_FILE) -o $@ -L. -l$(NAME)
+	$(CC) -I$(INCLUDE_DIR) $(TEST_FLAGS) $(TEST_FILE) -o $@ -L. -l$(NAME)
 
 $(TARGET_LIB_REAL_NAME): $(OBJS)
 	$(CXX) ${LDFLAGS} $^ -o $@
@@ -56,7 +64,7 @@ all: lib$(NAME) test
 install:
 # install headers
 	mkdir -p $(INSTALL_DIR)/include/$(NAME)
-	cp $(HEADER_FILE) $(INSTALL_DIR)/include/$(NAME)
+	cp -r $(INCLUDE_DIR)/*.h $(INSTALL_DIR)/include/$(NAME)
 
 # install library in lib/
 	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
