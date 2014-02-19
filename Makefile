@@ -15,7 +15,7 @@ INCLUDE_DIR=./include/whale
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -g
-CXXFLAGS = -I$(INCLUDE_DIR) -fPIC -Wall -MP -MMD
+CXXFLAGS = -I$(INCLUDE_DIR) -fPIC -Wall -MP -MMD -I/usr/include/lam
 
 ifdef DEBUG
 CXXFLAGS += -g -UNDEBUG
