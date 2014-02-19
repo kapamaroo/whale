@@ -10,7 +10,7 @@ TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
 INSTALL_DIR=/opt/Work/FEniCS
-INCLUDE_DIR=./include/whale
+INCLUDE_DIR=./include
 
 CC = gcc
 CXX = g++
