@@ -9,27 +9,24 @@ TARGET_LIB_LINKER_NAME = lib${NAME}.so
 TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
-INSTALL_DIR=/opt/Work/FEniCS
-INCLUDE_DIR=./include
+INSTALL_DIR=~/Work/FEniCS
+TEST_FILE = test.cpp
 
-CC = gcc
 CXX = g++
-CFLAGS = -Wall -g
-CXXFLAGS = -I$(INCLUDE_DIR) -fPIC -Wall -MP -MMD -I/usr/include/lam
+RM = rm -f
 
 ifdef DEBUG
-CXXFLAGS += -g -UNDEBUG
+CXXFLAGS = -g -UNDEBUG
 else
-CXXFLAGS += -O3 -march=native -DNDEBUG
+CXXFLAGS = -O3 -march=native -DNDEBUG
 endif
 
+CXXFLAGS += -DHAS_WHALE -fPIC -Wall -MP -MMD -I./include -I/usr/include/lam -I$(INSTALL_DIR)/include
 LDFLAGS =-shared -Wl,-soname,$(TARGET_LIB_SONAME)
-TEST_FLAGS = -Wall -g
-RM = rm -f
-TEST_FILE = test.c
+TEST_FLAGS = -DHAS_WHALE -Wall -g -I./include -I$(INSTALL_DIR)/include
 
 DEPS = whale.h
-SRCS = whale.cpp
+SRCS = src/WhaleCore.cpp src/WhaleVector.cpp
 OBJS = $(SRCS:.cpp=.o)
 
 -include $(SRCS:.cpp=.d)
@@ -43,8 +40,11 @@ lib$(NAME): $(TARGET_LIB_LINKER_NAME)
 run-test:
 	LD_LIBRARY_PATH=. ./test
 
-test: lib$(NAME).so
-	$(CC) -I$(INCLUDE_DIR) $(TEST_FLAGS) $(TEST_FILE) -o $@ -L. -l$(NAME)
+test.o:
+	$(CXX) $(TEST_FLAGS) -c -o $@ $(TEST_FILE)
+
+test: test.o lib$(NAME)
+	$(CXX) -o $@ -Wall -L. test.o -l$(NAME)
 
 $(TARGET_LIB_REAL_NAME): $(OBJS)
 	$(CXX) ${LDFLAGS} $^ -o $@
@@ -64,7 +64,7 @@ all: lib$(NAME) test
 install:
 # install headers
 	mkdir -p $(INSTALL_DIR)/include/$(NAME)
-	cp -r $(INCLUDE_DIR)/*.h $(INSTALL_DIR)/include/$(NAME)
+	cp -r ./include/$(NAME)/*.h $(INSTALL_DIR)/include/$(NAME)
 
 # install library in lib/
 	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
@@ -79,7 +79,7 @@ uninstall:
 
 .PHONY: clean
 clean:
-	-${RM} ${TARGET_LIB_LINKER_NAME} ${TARGET_LIB_SONAME} ${TARGET_LIB_REAL_NAME} ${OBJS} $(SRCS:.cpp=.d) test *~ core
+	-${RM} ${TARGET_LIB_LINKER_NAME} ${TARGET_LIB_SONAME} ${TARGET_LIB_REAL_NAME} ${OBJS} $(SRCS:.cpp=.d) test test.o *~ core
 
 archive:
 	git archive --format=zip master -o lib$(NAME)-$(VERSION).zip

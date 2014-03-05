@@ -1,4 +1,4 @@
-#include "whale.h"
+#include <whale/WhaleCore.h>
 
 #include <iostream>
 
