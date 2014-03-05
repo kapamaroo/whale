@@ -5,5 +5,5 @@
 *.so*
 *.o
 *.d
+.settings/*
 test
-
