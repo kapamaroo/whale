@@ -4,6 +4,10 @@
 #include <whale/WhaleCore.h>
 #include <dolfin/la/WhaleVector.h>
 
-void WhalePrintVector(const dolfin::WhaleVector&);
+namespace whale {
+
+    void WhalePrintVector(const dolfin::WhaleVector&);
+
+}
 
 #endif
