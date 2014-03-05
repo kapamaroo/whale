@@ -4,5 +4,6 @@
 *~
 *.so*
 *.o
+*.d
 test
-whale.d
+
