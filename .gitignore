@@ -5,5 +5,7 @@
 *.so*
 *.o
 *.d
+build/*
+lib/*
 .settings/*
 test
