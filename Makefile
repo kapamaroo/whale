@@ -10,10 +10,12 @@ TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
 INSTALL_DIR=~/Work/FEniCS
+SRC_DIR=src
+BUILD_DIR=build
 TEST_FILE = test.cpp
 
 CXX = g++
-RM = rm -f
+RM = rm -rf
 
 ifdef DEBUG
 CXXFLAGS = -g -UNDEBUG
@@ -25,41 +27,45 @@ CXXFLAGS += -DHAS_WHALE -fPIC -Wall -MP -MMD -I./include -I/usr/include/lam -I$(
 LDFLAGS =-shared -Wl,-soname,$(TARGET_LIB_SONAME)
 TEST_FLAGS = -DHAS_WHALE -Wall -g -I./include -I$(INSTALL_DIR)/include
 
-DEPS = whale.h
-SRCS = src/WhaleCore.cpp src/WhaleVector.cpp
-OBJS = $(SRCS:.cpp=.o)
+DEPS = $(wildcard include/*.h)
+SRCS = $(wildcard $(SRC_DIR)/*.cpp)
+OBJS = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o, $(SRCS))
 
 -include $(SRCS:.cpp=.d)
 
-%.o: %.cpp $(DEPS)
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+.PHONY: all
+all: $(BUILD_DIR) lib lib$(NAME) test
 
 .PHONY: lib$(NAME)
-lib$(NAME): $(TARGET_LIB_LINKER_NAME)
+lib$(NAME): lib/$(TARGET_LIB_LINKER_NAME)
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+lib:
+	mkdir -p lib
 
 run-test:
-	LD_LIBRARY_PATH=. ./test
+	LD_LIBRARY_PATH=lib:$(LD_LIBRARY_PATH) $(BUILD_DIR)/test
 
-test.o:
+$(BUILD_DIR)/test.o:
 	$(CXX) $(TEST_FLAGS) -c -o $@ $(TEST_FILE)
 
-test: test.o lib$(NAME)
-	$(CXX) -o $@ -Wall -L. test.o -l$(NAME)
+$(BUILD_DIR)/test: $(BUILD_DIR)/test.o lib$(NAME)
+	$(CXX) -o $@ -Wall -Llib $(BUILD_DIR)/test.o -l$(NAME)
 
-$(TARGET_LIB_REAL_NAME): $(OBJS)
+.PHONY: test
+test: $(BUILD_DIR)/test
+
+lib/$(TARGET_LIB_REAL_NAME): $(OBJS)
 	$(CXX) ${LDFLAGS} $^ -o $@
 
-.PHONY: $(TARGET_LIB_SONAME)
-$(TARGET_LIB_SONAME): $(TARGET_LIB_REAL_NAME)
-	ln -sf $(TARGET_LIB_REAL_NAME) $(TARGET_LIB_SONAME)
+lib/$(TARGET_LIB_SONAME): lib/$(TARGET_LIB_REAL_NAME)
+	ln -sf $(TARGET_LIB_REAL_NAME) lib/$(TARGET_LIB_SONAME)
 
-.PHONY: $(TARGET_LIB_LINKER_NAME)
-$(TARGET_LIB_LINKER_NAME): $(TARGET_LIB_SONAME)
-#	ldconfig -v -n .
-	ln -sf $(TARGET_LIB_SONAME) $(TARGET_LIB_LINKER_NAME)
-
-.PHONY: all
-all: lib$(NAME) test
+lib/$(TARGET_LIB_LINKER_NAME): lib/$(TARGET_LIB_SONAME)
+#	ldconfig -v -n lib/
+	ln -sf $(TARGET_LIB_SONAME) lib/$(TARGET_LIB_LINKER_NAME)
 
 install:
 # install headers
@@ -67,9 +73,13 @@ install:
 	cp -r ./include/$(NAME)/*.h $(INSTALL_DIR)/include/$(NAME)
 
 # install library in lib/
-	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
-	cp -d $(TARGET_LIB_SONAME) $(INSTALL_DIR)/lib
-	cp -d $(TARGET_LIB_LINKER_NAME) $(INSTALL_DIR)/lib
+	cp -d lib/* $(INSTALL_DIR)/lib
+#	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
+#	cp -d $(TARGET_LIB_SONAME) $(INSTALL_DIR)/lib
+#	cp -d $(TARGET_LIB_LINKER_NAME) $(INSTALL_DIR)/lib
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(DEPS)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 uninstall:
 	rm -rf $(INSTALL_DIR)/include/$(NAME)
@@ -79,7 +89,7 @@ uninstall:
 
 .PHONY: clean
 clean:
-	-${RM} ${TARGET_LIB_LINKER_NAME} ${TARGET_LIB_SONAME} ${TARGET_LIB_REAL_NAME} ${OBJS} $(SRCS:.cpp=.d) test test.o *~ core
+	-${RM} $(SRC_DIR)/*~ core $(BUILD_DIR) lib
 
 archive:
 	git archive --format=zip master -o lib$(NAME)-$(VERSION).zip
