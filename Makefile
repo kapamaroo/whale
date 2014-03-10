@@ -74,9 +74,6 @@ install:
 
 # install library in lib/
 	cp -d lib/* $(INSTALL_DIR)/lib
-#	cp -d $(TARGET_LIB_REAL_NAME) $(INSTALL_DIR)/lib
-#	cp -d $(TARGET_LIB_SONAME) $(INSTALL_DIR)/lib
-#	cp -d $(TARGET_LIB_LINKER_NAME) $(INSTALL_DIR)/lib
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(DEPS)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
