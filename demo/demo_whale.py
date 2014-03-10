@@ -67,7 +67,8 @@ u = Function(V)
 solve(a == L, u, bc)
 
 info(u.vector())
-u=u.vector()*2
+#u=u*2
+u.vector()[:]=u.vector().array()*2
 
 testvector = Vector()
 testvector.TestVector()
