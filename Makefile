@@ -9,7 +9,9 @@ TARGET_LIB_LINKER_NAME = lib${NAME}.so
 TARGET_LIB_SONAME = lib$(NAME).so.$(MAJOR)
 TARGET_LIB_REAL_NAME = lib$(NAME).so.$(VERSION)
 
-INSTALL_DIR=~/Work/FEniCS
+# MUST be the same as in the install.sh script
+INSTALL_DIR=/opt/FEniCS
+
 SRC_DIR=src
 BUILD_DIR=build
 TEST_FILE = test.cpp
@@ -23,7 +25,7 @@ else
 CXXFLAGS = -O3 -march=native -DNDEBUG
 endif
 
-CXXFLAGS += -DHAS_WHALE -fPIC -Wall -MP -MMD -I./include -I/usr/include/lam -I$(INSTALL_DIR)/include
+CXXFLAGS += -DHAS_WHALE -fPIC -Wall -MP -MMD -I./include -I/usr/include/lam -I$(INSTALL_DIR)/include -std=gnu++11
 LDFLAGS =-shared -Wl,-soname,$(TARGET_LIB_SONAME)
 TEST_FLAGS = -DHAS_WHALE -Wall -g -I./include -I$(INSTALL_DIR)/include
 
