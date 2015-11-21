@@ -1,0 +1,2206 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f14a3bb..6f3ef42 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -115,6 +115,7 @@ list(APPEND OPTIONAL_PACKAGES "Sphinx")
+ list(APPEND OPTIONAL_PACKAGES "HDF5")
+ list(APPEND OPTIONAL_PACKAGES "VTK")
+ list(APPEND OPTIONAL_PACKAGES "QT")
++list(APPEND OPTIONAL_PACKAGES "whale")
+ 
+ # Add options
+ foreach (OPTIONAL_PACKAGE ${OPTIONAL_PACKAGES})
+@@ -597,6 +598,18 @@ if (DOLFIN_ENABLE_QT)
+   find_package(Qt4)
+ endif()
+ 
++# Check for Whale
++if (DOLFIN_ENABLE_WHALE)
++  #find_package(whale)
++  find_path(WHALE_INCLUDE_DIR whale/whale.h)
++  find_library(WHALE_LIBRARY whale /opt/Work/FEniCS/lib)
++  set(WHALE_INCLUDE_DIRS ${WHALE_INCLUDE_DIR})
++  set(WHALE_LIBRARIES ${WHALE_LIBRARY})
++  set(WHALE_DEFINITIONS "-DHAS_WHALE")
++  find_package_handle_standard_args(whale DEFAULT_MSG WHALE_INCLUDE_DIR WHALE_LIBRARY)
++  mark_as_advanced(WHALE_INCLUDE_DIR WHALE_LIBRARY)
++endif()
++
+ # Check for VTK
+ if (DOLFIN_ENABLE_VTK)
+   find_package(VTK HINTS ${VTK_DIR} $ENV{VTK_DIR} NO_MODULE)
+diff --git a/dolfin/CMakeLists.txt b/dolfin/CMakeLists.txt
+index 9c6dd65..5f566d2 100644
+--- a/dolfin/CMakeLists.txt
++++ b/dolfin/CMakeLists.txt
+@@ -247,6 +247,13 @@ if (DOLFIN_ENABLE_VTK AND VTK_FOUND)
+   list(APPEND DOLFIN_EXTRA_TARGET_LINK_LIBRARIES ${DOLFIN_VTK_LIBRARIES})
+ endif()
+ 
++# Whale
++if (DOLFIN_ENABLE_WHALE AND WHALE_FOUND)
++  list(APPEND DOLFIN_CXX_DEFINITIONS ${WHALE_DEFINITIONS})
++  list(APPEND DOLFIN_DEP_SYSTEM_INCLUDE_DIRECTORIES ${WHALE_INCLUDE_DIRS})
++  list(APPEND DOLFIN_TARGET_LINK_LIBRARIES ${WHALE_LIBRARIES})
++endif()
++
+ #------------------------------------------------------------------------------
+ # Set compiler flags, include directories and library dependencies
+ 
+diff --git a/dolfin/common/SubSystemsManager.cpp b/dolfin/common/SubSystemsManager.cpp
+index bb1a819..85e3671 100644
+--- a/dolfin/common/SubSystemsManager.cpp
++++ b/dolfin/common/SubSystemsManager.cpp
+@@ -34,6 +34,10 @@
+ #include <slepc.h>
+ #endif
+ 
++#ifdef HAS_WHALE
++#include <whale/whale.h>
++#endif
++
+ #include <dolfin/common/constants.h>
+ #include <dolfin/common/Timer.h>
+ #include <dolfin/parameter/GlobalParameters.h>
+@@ -54,7 +58,8 @@ SubSystemsManager& SubSystemsManager::singleton()
+ }
+ //-----------------------------------------------------------------------------
+ SubSystemsManager::SubSystemsManager() : petsc_initialized(false),
+-                                         control_mpi(false)
++                                         control_mpi(false),
++                                         whale_initialized(false)
+ {
+   // Do nothing
+ }
+@@ -319,3 +324,49 @@ bool SubSystemsManager::mpi_finalized()
+   #endif
+ }
+ //-----------------------------------------------------------------------------
++
++void SubSystemsManager::init_whale(int argc, char *argv[])
++{
++#ifdef HAS_WHALE
++	if (singleton().whale_initialized )
++	    return;
++
++	const bool use_whale = parameters["use_whale_backend"];
++	if (use_whale) {
++		log(TRACE,"whale is enabled");
++		whale::WhaleInit(argc, argv);
++	}
++	else
++		log(TRACE,"whale is disabled");
++
++	singleton().whale_initialized = true;
++#else
++	dolfin_error("SubSystemsManager.cpp",
++	               "initialize Whale subsystem",
++	               "DOLFIN has not been configured with Whale support");
++#endif
++}
++
++void SubSystemsManager::init_whale()
++{
++#ifdef HAS_WHALE
++	if (singleton().whale_initialized )
++	    return;
++
++	const bool use_whale = parameters["use_whale_backend"];
++	if (use_whale) {
++		log(TRACE,"whale is enabled");
++		int argc = 0;
++		char** argv = NULL;
++		whale::WhaleInit(argc, argv);
++	}
++	else
++		log(TRACE,"whale is disabled");
++
++	singleton().whale_initialized = true;
++#else
++	dolfin_error("SubSystemsManager.cpp",
++	               "initialize Whale subsystem",
++	               "DOLFIN has not been configured with Whale support");
++#endif
++}
+diff --git a/dolfin/common/SubSystemsManager.h b/dolfin/common/SubSystemsManager.h
+index ffc9fcd..c190f3f 100644
+--- a/dolfin/common/SubSystemsManager.h
++++ b/dolfin/common/SubSystemsManager.h
+@@ -65,6 +65,9 @@ namespace dolfin
+     /// finalised)
+     static bool mpi_finalized();
+ 
++    static void init_whale();
++    static void init_whale(int argc, char *argv[]);
++
+   private:
+ 
+     // Constructor (private)
+@@ -88,6 +91,7 @@ namespace dolfin
+     // State variables
+     bool petsc_initialized;
+     bool control_mpi;
++    bool whale_initialized;
+ 
+   };
+ 
+diff --git a/dolfin/common/defines.cpp b/dolfin/common/defines.cpp
+index 3680bd5..4009a14 100644
+--- a/dolfin/common/defines.cpp
++++ b/dolfin/common/defines.cpp
+@@ -80,6 +80,15 @@ bool dolfin::has_petsc()
+ #endif
+ }
+ //-------------------------------------------------------------------------
++bool dolfin::has_whale()
++{
++#ifdef HAS_WHALE
++  return true;
++#else
++  return false;
++#endif
++}
++//-------------------------------------------------------------------------
+ bool dolfin::has_slepc()
+ {
+ #ifdef HAS_SLEPC
+diff --git a/dolfin/common/defines.h b/dolfin/common/defines.h
+index a949943..112efa1 100644
+--- a/dolfin/common/defines.h
++++ b/dolfin/common/defines.h
+@@ -73,6 +73,9 @@ namespace dolfin
+   /// Return true if DOLFIN is compiled with HDF5
+   bool has_hdf5();
+ 
++  /// Return true if DOLFIN is compiled with Whale
++  bool has_whale();
++
+ }
+ 
+ #endif
+diff --git a/dolfin/common/init.cpp b/dolfin/common/init.cpp
+index f62e6e4..31cff5d 100644
+--- a/dolfin/common/init.cpp
++++ b/dolfin/common/init.cpp
+@@ -31,5 +31,9 @@ void dolfin::init(int argc, char* argv[])
+   #ifdef HAS_PETSC
+   SubSystemsManager::init_petsc(argc, argv);
+   #endif
++
++  #ifdef HAS_WHALE
++  SubSystemsManager::init_whale(argc, argv);
++  #endif
+ }
+ //-----------------------------------------------------------------------------
+diff --git a/dolfin/la/DefaultFactory.cpp b/dolfin/la/DefaultFactory.cpp
+index b8cbe1b..cca5743 100644
+--- a/dolfin/la/DefaultFactory.cpp
++++ b/dolfin/la/DefaultFactory.cpp
+@@ -25,6 +25,7 @@
+ #include "PETScFactory.h"
+ #include "STLFactory.h"
+ #include "TpetraFactory.h"
++#include "WhaleFactory.h"
+ #include "DefaultFactory.h"
+ 
+ using namespace dolfin;
+@@ -84,6 +85,19 @@ DefaultFactory::krylov_solver_preconditioners() const
+ //-----------------------------------------------------------------------------
+ GenericLinearAlgebraFactory& DefaultFactory::factory()
+ {
++#ifdef HAS_WHALE
++  const bool use_whale = dolfin::parameters["use_whale_backend"];
++  if (use_whale)
++  {
++    return WhaleFactory::instance();
++  }
++#endif
++
++  factory_internal();
++}
++//-----------------------------------------------------------------------------
++GenericLinearAlgebraFactory& DefaultFactory::factory_internal()
++{
+   // Fallback
+   const std::string default_backend = "Eigen";
+ 
+diff --git a/dolfin/la/DefaultFactory.h b/dolfin/la/DefaultFactory.h
+index 9ff0869..dc541c0 100644
+--- a/dolfin/la/DefaultFactory.h
++++ b/dolfin/la/DefaultFactory.h
+@@ -74,6 +74,7 @@ namespace dolfin
+ 
+     /// Return instance of default backend
+     static GenericLinearAlgebraFactory& factory();
++    static GenericLinearAlgebraFactory& factory_internal();
+ 
+   };
+ 
+diff --git a/dolfin/la/GenericLUSolver.h b/dolfin/la/GenericLUSolver.h
+index 464dc95..dc82ed8 100644
+--- a/dolfin/la/GenericLUSolver.h
++++ b/dolfin/la/GenericLUSolver.h
+@@ -27,6 +27,10 @@
+ #include <dolfin/common/Variable.h>
+ #include "GenericLinearSolver.h"
+ 
++#ifdef HAS_WHALE
++#include "WhaleExtensions.h"
++#endif
++
+ namespace dolfin
+ {
+ 
+@@ -37,6 +41,9 @@ namespace dolfin
+   /// This a base class for LU solvers
+ 
+   class GenericLUSolver : public GenericLinearSolver
++#ifdef HAS_WHALE
++  ,public GenericWhaleLUSolver
++#endif
+   {
+ 
+   public:
+diff --git a/dolfin/la/GenericLinearOperator.h b/dolfin/la/GenericLinearOperator.h
+index edb1910..c19588a 100644
+--- a/dolfin/la/GenericLinearOperator.h
++++ b/dolfin/la/GenericLinearOperator.h
+@@ -23,6 +23,10 @@
+ 
+ #include "LinearAlgebraObject.h"
+ 
++#ifdef HAS_WHALE
++#include "WhaleExtensions.h"
++#endif
++
+ namespace dolfin
+ {
+ 
+@@ -40,6 +44,9 @@ namespace dolfin
+   /// use the _LinearOperator_ class.
+ 
+   class GenericLinearOperator : public virtual LinearAlgebraObject
++#ifdef HAS_WHALE
++  ,virtual public GenericWhaleLinearOperator
++#endif
+   {
+   public:
+ 
+@@ -58,6 +65,7 @@ namespace dolfin
+   protected:
+ 
+     friend class LinearOperator;
++    friend class WhaleLinearOperator;
+ 
+     // Initialize linear operator to match parallel layout of vectors
+     // x and y for product y = Ax. Needs to be implemented by backend.
+diff --git a/dolfin/la/GenericLinearSolver.h b/dolfin/la/GenericLinearSolver.h
+index 3e72bc1..328b9e5 100644
+--- a/dolfin/la/GenericLinearSolver.h
++++ b/dolfin/la/GenericLinearSolver.h
+@@ -28,6 +28,10 @@
+ #include <dolfin/common/Variable.h>
+ #include <dolfin/log/log.h>
+ 
++#ifdef HAS_WHALE
++#include "WhaleExtensions.h"
++#endif
++
+ namespace dolfin
+ {
+ 
+@@ -40,6 +44,10 @@ namespace dolfin
+   /// This class provides a general solver for linear systems Ax = b.
+ 
+   class GenericLinearSolver : public Variable
++#ifdef HAS_WHALE
++  ,virtual public GenericWhaleLinearSolver
++  ,public GenericWhaleKrylovSolver
++#endif
+   {
+   public:
+ 
+diff --git a/dolfin/la/GenericMatrix.h b/dolfin/la/GenericMatrix.h
+index 144513a..6938bdf 100644
+--- a/dolfin/la/GenericMatrix.h
++++ b/dolfin/la/GenericMatrix.h
+@@ -33,6 +33,10 @@
+ #include "GenericTensor.h"
+ #include "GenericLinearOperator.h"
+ 
++#ifdef HAS_WHALE
++#include "WhaleExtensions.h"
++#endif
++
+ namespace dolfin
+ {
+ 
+@@ -42,6 +46,9 @@ namespace dolfin
+   /// This class defines a common interface for matrices.
+ 
+   class GenericMatrix : public GenericTensor, public GenericLinearOperator
++#ifdef HAS_WHALE
++  ,public GenericWhaleMatrix
++#endif
+   {
+   public:
+ 
+diff --git a/dolfin/la/GenericVector.h b/dolfin/la/GenericVector.h
+index bec570f..b613b0f 100644
+--- a/dolfin/la/GenericVector.h
++++ b/dolfin/la/GenericVector.h
+@@ -36,6 +36,10 @@
+ #include "TensorLayout.h"
+ #include "GenericTensor.h"
+ 
++#ifdef HAS_WHALE
++#include "WhaleExtensions.h"
++#endif
++
+ namespace dolfin
+ {
+   template<typename T> class Array;
+@@ -43,6 +47,9 @@ namespace dolfin
+   /// This class defines a common interface for vectors.
+ 
+   class GenericVector : public GenericTensor
++#ifdef HAS_WHALE
++  ,public GenericWhaleVector
++#endif
+   {
+   public:
+ 
+diff --git a/dolfin/la/KrylovSolver.h b/dolfin/la/KrylovSolver.h
+index 24e456b..42af060 100644
+--- a/dolfin/la/KrylovSolver.h
++++ b/dolfin/la/KrylovSolver.h
+@@ -83,6 +83,11 @@ namespace dolfin
+       this->parameters.update(parameters);
+       solver->parameters.update(parameters);
+     }
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestKrylovSolver();
++#endif
++
+ 
+     // FIXME: This should not be needed. Need to cleanup linear solver
+     // name jungle: default, lu, iterative, direct, krylov, etc
+diff --git a/dolfin/la/LUSolver.h b/dolfin/la/LUSolver.h
+index 2eb68ab..ee4f4bf 100644
+--- a/dolfin/la/LUSolver.h
++++ b/dolfin/la/LUSolver.h
+@@ -89,6 +89,12 @@ namespace dolfin
+       this->parameters.update(parameters);
+       solver->parameters.update(parameters);
+     }
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestLUSolver();
++    virtual void TestLinearSolver();
++#endif
++
+ 
+     // FIXME: This should not be needed. Need to cleanup linear solver
+     // name jungle: default, lu, iterative, direct, krylov, etc /
+diff --git a/dolfin/la/LinearOperator.h b/dolfin/la/LinearOperator.h
+index 68904aa..d771c34 100644
+--- a/dolfin/la/LinearOperator.h
++++ b/dolfin/la/LinearOperator.h
+@@ -73,6 +73,11 @@ namespace dolfin
+     /// Return concrete instance / unwrap (shared pointer version)
+     virtual std::shared_ptr<LinearAlgebraObject> shared_instance();
+ 
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestLinearOperator();
++#endif
++
+   private:
+ 
+     // Pointer to concrete implementation
+diff --git a/dolfin/la/LinearSolver.h b/dolfin/la/LinearSolver.h
+index 3eb97ea..f6cde12 100644
+--- a/dolfin/la/LinearSolver.h
++++ b/dolfin/la/LinearSolver.h
+@@ -80,6 +80,11 @@ namespace dolfin
+       this->parameters.update(parameters);
+       solver->update_parameters(parameters);
+     }
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestLinearSolver();
++#endif
++
+ 
+     // FIXME: This should not be needed. Need to cleanup linear solver
+     // name jungle: default, lu, iterative, direct, krylov, etc
+@@ -94,6 +99,8 @@ namespace dolfin
+     friend class KrylovSolver;
+     friend class LinearVariationalSolver;
+     friend class NewtonSolver;
++    friend class WhaleKrylovSolver;
++    friend class WhaleLUSolver;
+ 
+     // Check whether string is contained in list
+     static bool in_list(const std::string& method,
+diff --git a/dolfin/la/Matrix.h b/dolfin/la/Matrix.h
+index 36f40c5..3d46eec 100644
+--- a/dolfin/la/Matrix.h
++++ b/dolfin/la/Matrix.h
+@@ -239,6 +239,12 @@ namespace dolfin
+     const Matrix& operator= (const Matrix& A)
+     { *matrix = *A.matrix; return *this; }
+ 
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestMatrix();
++    virtual void TestLinearOperator();
++#endif
++
+   private:
+ 
+     // Pointer to concrete implementation
+diff --git a/dolfin/la/PETScVector.cpp b/dolfin/la/PETScVector.cpp
+index 7805bcc..a1ca576 100644
+--- a/dolfin/la/PETScVector.cpp
++++ b/dolfin/la/PETScVector.cpp
+@@ -77,6 +77,10 @@ PETScVector::PETScVector(const PETScVector& v) : _x(NULL)
+ {
+   PetscErrorCode ierr;
+ 
++  // avoid crashing if the vector is uninitialized
++  if (!v._x)
++      return;
++
+   // Create new vector
+   ierr = VecDuplicate(v._x, &_x);
+   if (ierr != 0) petsc_error(ierr, __FILE__, "VecDuplicate");
+diff --git a/dolfin/la/Vector.h b/dolfin/la/Vector.h
+index 21aed8d..d7d459d 100644
+--- a/dolfin/la/Vector.h
++++ b/dolfin/la/Vector.h
+@@ -285,6 +285,11 @@ namespace dolfin
+     const Vector& operator= (const Vector& x)
+     { *vector = *x.vector; return *this; }
+ 
++#ifdef HAS_WHALE
++    /// Whale Extensions Interface
++    virtual void TestVector();
++#endif
++
+   private:
+ 
+     // Pointer to concrete implementation
+diff --git a/dolfin/la/WhaleExtensions.cpp b/dolfin/la/WhaleExtensions.cpp
+new file mode 100644
+index 0000000..3ca374d
+--- /dev/null
++++ b/dolfin/la/WhaleExtensions.cpp
+@@ -0,0 +1,108 @@
++#ifdef HAS_WHALE
++
++#include <iostream>
++
++#include "WhaleExtensions.h"
++#include "WhaleVector.h"
++#include "WhaleMatrix.h"
++#include "WhaleLinearOperator.h"
++#include "WhaleLUSolver.h"
++#include "WhaleKrylovSolver.h"
++
++#include "Vector.h"
++#include "Matrix.h"
++#include "LinearOperator.h"
++#include "LinearSolver.h"
++#include "LUSolver.h"
++#include "KrylovSolver.h"
++
++namespace dolfin
++{
++
++void Vector::TestVector()
++{
++    GenericWhaleVector& Base = this->down_cast<GenericWhaleVector>();
++    Base.TestVector();
++}
++
++void Matrix::TestMatrix()
++{
++    GenericWhaleMatrix& Base = this->down_cast<GenericWhaleMatrix>();
++    Base.TestMatrix();
++}
++
++void Matrix::TestLinearOperator()
++{
++    GenericWhaleLinearOperator& Base = this->down_cast<GenericWhaleLinearOperator>();
++    Base.TestLinearOperator();
++}
++
++void LinearOperator::TestLinearOperator()
++{
++    GenericWhaleLinearOperator& _matABase = _matA->down_cast<GenericWhaleLinearOperator>();
++    _matABase.TestLinearOperator();
++}
++
++void LUSolver::TestLinearSolver()
++{
++    GenericWhaleLinearSolver& Base = dynamic_cast<GenericWhaleLinearSolver&>(*solver.get());
++    Base.TestLinearSolver();
++}
++
++void LUSolver::TestLUSolver()
++{
++    GenericLUSolver& LBase = dynamic_cast<GenericLUSolver&>(*solver.get());
++    GenericWhaleLUSolver& Base = dynamic_cast<GenericWhaleLUSolver&>(LBase);
++    Base.TestLUSolver();
++}
++
++void KrylovSolver::TestKrylovSolver()
++{
++    GenericWhaleKrylovSolver& Base = dynamic_cast<GenericWhaleKrylovSolver&>(*solver.get());
++    Base.TestKrylovSolver();
++}
++
++void LinearSolver::TestLinearSolver()
++{
++    GenericWhaleLinearSolver& Base = dynamic_cast<GenericWhaleLinearSolver&>(*solver.get());
++    Base.TestLinearSolver();
++}
++
++void WhaleVector::TestVector()
++{
++  std::cout << "WhaleVector test\n";
++}
++
++void WhaleMatrix::TestMatrix()
++{
++  std::cout << "WhaleMatrix test\n";
++}
++
++void WhaleMatrix::TestLinearOperator()
++{
++  std::cout << "WhaleMatrix TestLinearOperator\n";
++}
++
++void WhaleLinearOperator::TestLinearOperator()
++{
++  std::cout << "WhaleLinearOperator TestLinearOperator\n";
++}
++
++void WhaleLUSolver::TestLUSolver()
++{
++  std::cout << "WhaleLUSolver TestLUSolver\n";
++}
++
++void WhaleLUSolver::TestLinearSolver()
++{
++  std::cout << "WhaleLUSolver TestLinearSolver\n";
++}
++
++void WhaleKrylovSolver::TestKrylovSolver()
++{
++  std::cout << "WhaleKrylovSolver TestKrylovSolver\n";
++}
++
++}
++
++#endif
+diff --git a/dolfin/la/WhaleExtensions.h b/dolfin/la/WhaleExtensions.h
+new file mode 100644
+index 0000000..9d57f44
+--- /dev/null
++++ b/dolfin/la/WhaleExtensions.h
+@@ -0,0 +1,62 @@
++/*
++ * WhaleExtensions.h
++ *
++ *  Created on: Feb 25, 2014
++ *      Author: emmmarou
++ */
++
++#ifndef WHALEEXTENSIONS_H_
++#define WHALEEXTENSIONS_H_
++
++#ifdef HAS_WHALE
++
++namespace dolfin
++{
++
++class GenericWhaleVector
++{
++public:
++	virtual ~GenericWhaleVector() {}
++	virtual void TestVector() {};
++};
++
++class GenericWhaleLinearOperator
++{
++public:
++	virtual ~GenericWhaleLinearOperator() {}
++	virtual void TestLinearOperator() {};
++};
++
++class GenericWhaleMatrix : virtual public GenericWhaleLinearOperator
++{
++public:
++	virtual ~GenericWhaleMatrix() {}
++	virtual void TestMatrix() {};
++};
++
++class GenericWhaleLinearSolver
++{
++public:
++	virtual ~GenericWhaleLinearSolver() {}
++	virtual void TestLinearSolver() {};
++};
++
++class GenericWhaleLUSolver : virtual public GenericWhaleLinearSolver
++{
++public:
++	virtual ~GenericWhaleLUSolver() {}
++	virtual void TestLUSolver() {};
++};
++
++class GenericWhaleKrylovSolver
++{
++public:
++	virtual ~GenericWhaleKrylovSolver() {}
++	virtual void TestKrylovSolver() {};
++};
++
++}
++
++#endif
++
++#endif /* WHALEEXTENSIONS_H_ */
+diff --git a/dolfin/la/WhaleFactory.cpp b/dolfin/la/WhaleFactory.cpp
+new file mode 100644
+index 0000000..8d3e2bd
+--- /dev/null
++++ b/dolfin/la/WhaleFactory.cpp
+@@ -0,0 +1,87 @@
++#ifdef HAS_WHALE
++
++#include <dolfin/parameter/GlobalParameters.h>
++#include "WhaleFactory.h"
++#include "DefaultFactory.h"
++#include "WhaleVector.h"
++#include "WhaleMatrix.h"
++#include "WhaleLinearOperator.h"
++#include "WhaleLUSolver.h"
++#include "WhaleKrylovSolver.h"
++
++using namespace dolfin;
++
++WhaleFactory WhaleFactory::factory;
++
++//-----------------------------------------------------------------------------
++std::shared_ptr<GenericMatrix> WhaleFactory::create_matrix() const
++{
++  log(PROGRESS,"whale create_matrix\n");
++  std::shared_ptr<GenericMatrix> M(df().create_matrix());
++  std::shared_ptr<GenericMatrix> W(new WhaleMatrix(*M.get()));
++  return W;
++}
++//-----------------------------------------------------------------------------
++std::shared_ptr<GenericVector> WhaleFactory::create_vector() const
++{
++  log(PROGRESS,"whale create_vector\n");
++  std::shared_ptr<GenericVector> V(df().create_vector());
++  std::shared_ptr<GenericVector> W(new WhaleVector(*V.get()));
++  return W;
++}
++//-----------------------------------------------------------------------------
++std::shared_ptr<TensorLayout> WhaleFactory::create_layout(std::size_t rank) const
++{
++  return df().create_layout(rank);
++}
++//-----------------------------------------------------------------------------
++std::shared_ptr<GenericLinearOperator> WhaleFactory::create_linear_operator() const
++{
++  log(PROGRESS,"whale create_linear_operator\n");
++  std::shared_ptr<GenericLinearOperator> L(df().create_linear_operator());
++  std::shared_ptr<GenericLinearOperator> W(new WhaleLinearOperator(L.get()));
++  return W;
++}
++//-----------------------------------------------------------------------------
++std::shared_ptr<GenericLUSolver>
++  WhaleFactory::create_lu_solver(std::string method) const
++{
++  log(PROGRESS,"whale create_lu_solver\n");
++  std::shared_ptr<GenericLUSolver> W(new WhaleLUSolver(method));
++  return W;
++}
++//-----------------------------------------------------------------------------
++std::shared_ptr<GenericLinearSolver>
++  WhaleFactory::create_krylov_solver(std::string method,
++                                     std::string preconditioner) const
++{
++  log(PROGRESS,"whale create_krylov_solver\n");
++  std::shared_ptr<GenericLinearSolver> W(new WhaleKrylovSolver(method,preconditioner));
++  return W;
++}
++//-----------------------------------------------------------------------------
++std::map<std::string, std::string>
++  WhaleFactory::lu_solver_methods() const
++{
++  return df().lu_solver_methods();
++}
++ //-----------------------------------------------------------------------------
++std::map<std::string, std::string>
++  WhaleFactory::krylov_solver_methods() const
++{
++  return df().krylov_solver_methods();
++}
++//-----------------------------------------------------------------------------
++std::map<std::string, std::string>
++  WhaleFactory::krylov_solver_preconditioners() const
++{
++  return df().krylov_solver_preconditioners();
++}
++//-----------------------------------------------------------------------------
++GenericLinearAlgebraFactory& WhaleFactory::df() const
++{
++  DefaultFactory::factory_internal();
++}
++//-----------------------------------------------------------------------------
++
++#endif
+diff --git a/dolfin/la/WhaleFactory.h b/dolfin/la/WhaleFactory.h
+new file mode 100644
+index 0000000..d09d5ae
+--- /dev/null
++++ b/dolfin/la/WhaleFactory.h
+@@ -0,0 +1,68 @@
++#ifndef __WHALE_FACTORY_H
++#define __WHALE_FACTORY_H
++
++#ifdef HAS_WHALE
++
++#include "GenericLinearAlgebraFactory.h"
++
++namespace dolfin
++{
++
++  class WhaleFactory : public GenericLinearAlgebraFactory
++  {
++  public:
++
++	/// Destructor
++    virtual ~WhaleFactory() {}
++
++    /// Create empty matrix
++    virtual std::shared_ptr<GenericMatrix> create_matrix() const;
++
++    /// Create empty vector (global)
++    virtual std::shared_ptr<GenericVector> create_vector() const;
++
++    /// Create empty tensor layout
++    virtual std::shared_ptr<TensorLayout> create_layout(std::size_t rank) const;
++
++    /// Create empty linear operator
++    virtual std::shared_ptr<GenericLinearOperator> create_linear_operator() const;
++
++    /// Create LU solver
++    virtual std::shared_ptr<dolfin::GenericLUSolver>
++      create_lu_solver(std::string method) const;
++
++    /// Create Krylov solver
++    virtual std::shared_ptr<dolfin::GenericLinearSolver>
++      create_krylov_solver(std::string method, std::string preconditioner) const;
++
++    /// Return a list of available LU solver methods
++    std::map<std::string, std::string>
++      lu_solver_methods() const;
++
++    /// Return a list of available Krylov solver methods
++    std::map<std::string, std::string>
++      krylov_solver_methods() const;
++
++    /// Return a list of available preconditioners
++    std::map<std::string, std::string>
++      krylov_solver_preconditioners() const;
++
++    /// Return singleton instance
++    static WhaleFactory& instance()
++    { return factory; }
++
++    private:
++
++    GenericLinearAlgebraFactory& df() const;
++
++      /// Private constructor
++      WhaleFactory() {}
++      static WhaleFactory factory;
++
++  };
++
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/WhaleKrylovSolver.cpp b/dolfin/la/WhaleKrylovSolver.cpp
+new file mode 100644
+index 0000000..0ec455b
+--- /dev/null
++++ b/dolfin/la/WhaleKrylovSolver.cpp
+@@ -0,0 +1,112 @@
++#ifdef HAS_WHALE
++
++#include <dolfin/parameter/GlobalParameters.h>
++#include "WhaleKrylovSolver.h"
++#include "DefaultFactory.h"
++#include "KrylovSolver.h"
++#include "LinearSolver.h"
++
++using namespace dolfin;
++
++//-----------------------------------------------------------------------------
++Parameters WhaleKrylovSolver::default_parameters()
++{
++  return KrylovSolver::default_parameters();
++}
++//-----------------------------------------------------------------------------
++WhaleKrylovSolver::WhaleKrylovSolver(std::string method, std::string preconditioner)
++{
++  init(method, preconditioner);
++}
++//-----------------------------------------------------------------------------
++WhaleKrylovSolver::WhaleKrylovSolver(std::shared_ptr<const GenericLinearOperator> A,
++                 std::string method, std::string preconditioner)
++{
++  init(method, preconditioner);
++  set_operator(A);
++}
++//-----------------------------------------------------------------------------
++WhaleKrylovSolver::~WhaleKrylovSolver()
++{
++  // Do nothing
++}
++//-----------------------------------------------------------------------------
++void WhaleKrylovSolver::set_operator(const std::shared_ptr<const GenericLinearOperator> A)
++{
++  dolfin_assert(nested);
++  nested->parameters.update(parameters);
++  nested->set_operator(A);
++}
++//-----------------------------------------------------------------------------
++void WhaleKrylovSolver::set_operators(const std::shared_ptr<const GenericLinearOperator> A,
++                                 const std::shared_ptr<const GenericLinearOperator> P)
++{
++  dolfin_assert(nested);
++  nested->parameters.update(parameters);
++  nested->set_operators(A,P);
++}
++//-----------------------------------------------------------------------------
++void WhaleKrylovSolver::set_nullspace(const VectorSpaceBasis& nullspace)
++{
++  nested->set_nullspace(nullspace);
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleKrylovSolver::solve(GenericVector& x, const GenericVector& b)
++{
++  dolfin_assert(nested);
++  //check_dimensions(solver->get_operator(), x, b);
++
++  nested->parameters.update(parameters);
++  return nested->solve(x, b);
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleKrylovSolver::solve(const GenericLinearOperator& A,
++                                GenericVector& x,
++                                const GenericVector& b)
++{
++  dolfin_assert(nested);
++  //check_dimensions(A, x, b);
++
++  nested->parameters.update(parameters);
++  return nested->solve(A, x, b);
++}
++//-----------------------------------------------------------------------------
++void WhaleKrylovSolver::init(std::string method, std::string preconditioner)
++{
++  // Get default linear algebra factory
++  GenericLinearAlgebraFactory& factory = DefaultFactory::factory_internal();
++
++  // Get list of available methods and preconditioners
++  std::map<std::string, std::string>
++    methods = factory.krylov_solver_methods();
++  std::map<std::string, std::string>
++    preconditioners = factory.krylov_solver_preconditioners();
++
++  // Check that method is available
++  if (!LinearSolver::in_list(method, methods))
++  {
++    dolfin_error("WhaleKrylovSolver.cpp",
++                 "solve linear system using Krylov iteration",
++                 "Unknown Krylov method \"%s\". "
++                 "Use list_krylov_solver_methods() to list available Krylov methods",
++                 method.c_str());
++  }
++
++  // Check that preconditioner is available
++  if (!LinearSolver::in_list(preconditioner, preconditioners))
++  {
++    dolfin_error("WhaleKrylovSolver.cpp",
++                 "solve linear system using Krylov iteration",
++                 "Unknown preconditioner \"%s\". "
++                 "Use list_krylov_solver_preconditioners() to list available preconditioners()",
++                 preconditioner.c_str());
++  }
++
++  // Set default parameters
++  parameters = dolfin::parameters("krylov_solver");
++
++  // Initialize solver
++  nested = factory.create_krylov_solver(method, preconditioner);
++  nested->parameters.update(parameters);
++}
++#endif
+diff --git a/dolfin/la/WhaleKrylovSolver.h b/dolfin/la/WhaleKrylovSolver.h
+new file mode 100644
+index 0000000..3b8dd86
+--- /dev/null
++++ b/dolfin/la/WhaleKrylovSolver.h
+@@ -0,0 +1,87 @@
++#ifndef __WHALE_KRYLOV_SOLVER_H
++#define __WHALE_KRYLOV_SOLVER_H
++
++#ifdef HAS_WHALE
++
++#include <string>
++#include <vector>
++#include <memory>
++#include <boost/scoped_ptr.hpp>
++#include "GenericLinearSolver.h"
++#include "WhaleObject.h"
++#include "WhaleExtensions.h"
++
++namespace dolfin
++{
++
++  class GenericLinearOperator;
++  class GenericVector;
++  class VectorSpaceBasis;
++
++  /// This class defines an interface for a Krylov solver. The
++  /// approproiate solver is chosen on the basis of the matrix/vector
++  /// type.
++
++  class WhaleKrylovSolver : public GenericLinearSolver, public WhaleObject
++  {
++  public:
++
++    /// Constructor
++    WhaleKrylovSolver(std::string method="default",
++                 std::string preconditioner="default");
++
++    /// Constructor
++    WhaleKrylovSolver(std::shared_ptr<const GenericLinearOperator> A,
++                 std::string method="default",
++                 std::string preconditioner="default");
++
++    /// Destructor
++    ~WhaleKrylovSolver();
++
++    /// Set operator (matrix)
++    void set_operator(const std::shared_ptr<const GenericLinearOperator> A);
++
++    /// Set operator (matrix) and preconditioner matrix
++    void set_operators(const std::shared_ptr<const GenericLinearOperator> A,
++                       const std::shared_ptr<const GenericLinearOperator> P);
++
++    /// Set null space of the operator (matrix). This is used to solve
++    /// singular systems
++    void set_nullspace(const VectorSpaceBasis& nullspace);
++
++    /// Solve linear system Ax = b
++    std::size_t solve(GenericVector& x, const GenericVector& b);
++
++    /// Solve linear system Ax = b
++    std::size_t solve(const GenericLinearOperator& A,
++                      GenericVector& x, const GenericVector& b);
++
++    /// Default parameter values
++    static Parameters default_parameters();
++
++    /// Update solver parameters (pass parameters down to wrapped implementation)
++    virtual void update_parameters(const Parameters& parameters)
++    {
++      this->parameters.update(parameters);
++      nested->parameters.update(parameters);
++    }
++
++    std::shared_ptr<GenericLinearSolver> get_shared_nested() { return nested; }
++    const std::shared_ptr<GenericLinearSolver> get_shared_nested() const { return nested; }
++
++    virtual void TestKrylovSolver();
++
++    private:
++    // Initialize solver
++    void init(std::string method, std::string preconditioner);
++
++    // Solver
++    std::shared_ptr<GenericLinearSolver> nested;
++
++
++  };
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/WhaleLUSolver.cpp b/dolfin/la/WhaleLUSolver.cpp
+new file mode 100644
+index 0000000..1338267
+--- /dev/null
++++ b/dolfin/la/WhaleLUSolver.cpp
+@@ -0,0 +1,110 @@
++#ifdef HAS_WHALE
++
++#include <dolfin/parameter/GlobalParameters.h>
++#include "WhaleLUSolver.h"
++#include "DefaultFactory.h"
++#include "LUSolver.h"
++#include "LinearSolver.h"
++#include "WhaleLinearOperator.h"
++
++using namespace dolfin;
++
++//-----------------------------------------------------------------------------
++WhaleLUSolver::WhaleLUSolver(std::string method)
++{
++  init(method);
++}
++//-----------------------------------------------------------------------------
++WhaleLUSolver::WhaleLUSolver(std::shared_ptr<const GenericLinearOperator> A,
++        std::string method)
++{
++  init(method);
++  set_operator(as_type<const WhaleMatrix>(require_matrix(A)));
++}
++//-----------------------------------------------------------------------------
++WhaleLUSolver::~WhaleLUSolver()
++{
++  // Do nothing
++}
++//-----------------------------------------------------------------------------
++Parameters WhaleLUSolver::default_parameters()
++{
++  return LUSolver::default_parameters();
++}
++//-----------------------------------------------------------------------------
++void
++WhaleLUSolver::set_operator(const std::shared_ptr<const GenericLinearOperator> A)
++{
++  dolfin_assert(nested);
++  nested->update_parameters(parameters);
++  nested->set_operator(as_type<const WhaleMatrix>(require_matrix(A)));
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleLUSolver::solve(GenericVector& x, const GenericVector& b)
++{
++  dolfin_assert(nested);
++
++  nested->update_parameters(parameters);
++  return solve(as_type<WhaleVector>(x),as_type<const WhaleVector>(b));
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleLUSolver::solve(const GenericLinearOperator& A, GenericVector& x,
++                             const GenericVector& b)
++{
++  dolfin_assert(nested);
++
++  nested->update_parameters(parameters);
++  return solve(as_type<const WhaleMatrix>(require_matrix(A)),
++		  as_type<WhaleVector>(x),
++		  as_type<const WhaleVector>(b));
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleLUSolver::solve_transpose(GenericVector& x, const GenericVector& b)
++{
++  dolfin_assert(nested);
++
++  nested->update_parameters(parameters);
++  return solve_transpose(as_type<WhaleVector>(x),as_type<const WhaleVector>(b));
++}
++//-----------------------------------------------------------------------------
++std::size_t WhaleLUSolver::solve_transpose(const GenericLinearOperator& A,
++                                      GenericVector& x,
++                                      const GenericVector& b)
++{
++  dolfin_assert(nested);
++
++  nested->update_parameters(parameters);
++  return solve_transpose(as_type<const WhaleMatrix>(require_matrix(A)),
++		  as_type<WhaleVector>(x),
++		  as_type<const WhaleVector>(b));
++}
++//-----------------------------------------------------------------------------
++void WhaleLUSolver::init(std::string method)
++{
++  // Get default linear algebra factory
++  GenericLinearAlgebraFactory& factory = DefaultFactory::factory_internal();
++
++  // Get list of available methods
++  std::map<std::string, std::string>
++    methods = factory.lu_solver_methods();
++
++  // Check that method is available
++  if (!LinearSolver::in_list(method, methods))
++  {
++    dolfin_error("WhaleLUSolver.cpp",
++                 "solve linear system using LU factorization",
++                 "Unknown LU method \"%s\". "
++                 "Use list_lu_solver_methods() to list available LU methods",
++                 method.c_str());
++  }
++
++  // Set default parameters
++  parameters = dolfin::parameters("lu_solver");
++
++  // Initialize solver
++  nested = factory.create_lu_solver(method);
++  nested->update_parameters(parameters);
++}
++//-----------------------------------------------------------------------------
++
++#endif
+diff --git a/dolfin/la/WhaleLUSolver.h b/dolfin/la/WhaleLUSolver.h
+new file mode 100644
+index 0000000..df9f44a
+--- /dev/null
++++ b/dolfin/la/WhaleLUSolver.h
+@@ -0,0 +1,117 @@
++#ifndef __WHALE_LU_SOLVER_H
++#define __WHALE_LU_SOLVER_H
++
++#ifdef HAS_WHALE
++
++#include <string>
++#include <memory>
++#include "GenericLUSolver.h"
++#include "WhaleObject.h"
++#include "WhaleVector.h"
++#include "WhaleMatrix.h"
++#include "WhaleExtensions.h"
++#include "LinearAlgebraObject.h"
++
++namespace dolfin
++{
++
++  // Forward declarations
++  class GenericLinearOperator;
++  class GenericVector;
++
++  /// LU solver for the built-in LA backends.
++
++  class WhaleLUSolver : public GenericLUSolver, public WhaleObject
++  {
++  public:
++
++    /// Constructor
++    WhaleLUSolver(std::string method= "default");
++
++    /// Constructor
++    WhaleLUSolver(std::shared_ptr<const GenericLinearOperator> A,
++            std::string method="default");
++
++    /// Destructor
++    ~WhaleLUSolver();
++
++    /// Set operator (matrix)
++    void set_operator(const std::shared_ptr<const GenericLinearOperator> A);
++
++    /// Solve linear system Ax = b
++    std::size_t solve(GenericVector& x, const GenericVector& b);
++
++    /// Solve linear system A^Tx = b
++    std::size_t solve_transpose(GenericVector& x, const GenericVector& b);
++
++    /// Solve linear system
++    std::size_t solve(const GenericLinearOperator& A, GenericVector& x,
++                      const GenericVector& b);
++
++    /// Solve linear system
++    std::size_t solve_transpose(const GenericLinearOperator& A,
++                                GenericVector& x, const GenericVector& b);
++
++    /// Default parameter values
++    static Parameters default_parameters();
++
++    /// Update solver parameters (pass parameters down to wrapped implementation)
++    virtual void update_parameters(const Parameters& parameters)
++    {
++      this->parameters.update(parameters);
++      nested->update_parameters(parameters);
++    }
++
++    std::shared_ptr<GenericLinearSolver> get_shared_nested() { return nested; }
++    const std::shared_ptr<GenericLinearSolver> get_shared_nested() const { return nested; }
++
++    virtual void TestLUSolver();
++    virtual void TestLinearSolver();
++
++    private:
++
++    // Initialize solver
++    void init(std::string method);
++
++
++    /// Solve linear system Ax = b
++    std::size_t solve(WhaleVector& x, const WhaleVector& b)
++    {
++        return nested->solve(*x.get_shared_nested().get(),
++                             *b.get_shared_nested().get());
++    }
++
++    /// Solve linear system A^Tx = b
++    std::size_t solve_transpose(WhaleVector& x, const WhaleVector& b)
++    {
++        return nested->solve_transpose(*x.get_shared_nested().get(),
++                                       *b.get_shared_nested().get());
++    }
++
++    /// Solve linear system
++    std::size_t solve(const WhaleMatrix& A, WhaleVector& x,
++                      const WhaleVector& b)
++    {
++        return nested->solve(*A.get_shared_nested().get(),
++                             *x.get_shared_nested().get(),
++                             *b.get_shared_nested().get());
++    }
++
++    /// Solve linear system
++    std::size_t solve_transpose(const WhaleMatrix& A,
++                                WhaleVector& x, const WhaleVector& b)
++    {
++        return nested->solve_transpose(*A.get_shared_nested().get(),
++                                       *x.get_shared_nested().get(),
++                                       *b.get_shared_nested().get());
++    }
++
++    // Solver
++    std::shared_ptr<GenericLinearSolver> nested;
++
++  };
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/WhaleLinearOperator.cpp b/dolfin/la/WhaleLinearOperator.cpp
+new file mode 100644
+index 0000000..9e2cb2b
+--- /dev/null
++++ b/dolfin/la/WhaleLinearOperator.cpp
+@@ -0,0 +1,49 @@
++#ifdef HAS_WHALE
++
++#include <iostream>
++#include <memory>
++#include <dolfin/common/NoDeleter.h>
++#include <dolfin/common/types.h>
++#include <dolfin/log/dolfin_log.h>
++#include <dolfin/common/MPI.h>
++#include "WhaleVector.h"
++#include "WhaleLinearOperator.h"
++
++using namespace dolfin;
++
++//-----------------------------------------------------------------------------
++std::size_t WhaleLinearOperator::size(std::size_t dim) const
++{
++  return nested->size(dim);
++}
++//-----------------------------------------------------------------------------
++void WhaleLinearOperator::mult(const GenericVector& x, GenericVector& y) const
++{
++  nested->mult(x,y);
++}
++//-----------------------------------------------------------------------------
++std::string WhaleLinearOperator::str(bool verbose) const
++{
++  std::stringstream s;
++  if (verbose)
++  {
++    warning("Verbose output for WhaleLinearOperator not implemented.");
++    s << str(false);
++  }
++  else
++  {
++    s << "<WhaleLinearOperator>";
++  }
++
++  return s.str();
++}
++void WhaleLinearOperator::init_layout(const GenericVector& x,
++                      const GenericVector& y,
++                      GenericLinearOperator* wrapper)
++{
++  // Store wrapper
++  nested->init_layout(x,y,wrapper);
++}
++//-----------------------------------------------------------------------------
++
++#endif
+diff --git a/dolfin/la/WhaleLinearOperator.h b/dolfin/la/WhaleLinearOperator.h
+new file mode 100644
+index 0000000..5c630de
+--- /dev/null
++++ b/dolfin/la/WhaleLinearOperator.h
+@@ -0,0 +1,59 @@
++#ifndef __WHALE_LINEAR_OPERATOR_H
++#define __WHALE_LINEAR_OPERATOR_H
++
++#ifdef HAS_WHALE
++
++#include <string>
++#include "GenericLinearOperator.h"
++#include "WhaleObject.h"
++#include "WhaleExtensions.h"
++
++namespace dolfin
++{
++
++  // This is the Whale version of the _GenericLinearOperator_
++  // (matrix-free) interface for the solution of linear systems
++  // defined in terms of the action (matrix-vector product) of a
++  // linear operator.
++
++  class WhaleLinearOperator : public GenericLinearOperator, public WhaleObject
++  {
++  public:
++
++    /// Constructor
++    WhaleLinearOperator(GenericLinearOperator *op) : nested(op) {}
++
++    //--- Implementation of the GenericLinearOperator interface ---
++
++    /// Return size of given dimension
++    virtual std::size_t size(std::size_t dim) const;
++
++    /// Compute matrix-vector product y = Ax
++    virtual void mult(const GenericVector& x, GenericVector& y) const;
++
++    /// Return informal string representation (pretty-print)
++    virtual std::string str(bool verbose) const;
++
++    std::shared_ptr<GenericLinearOperator> get_shared_nested() { return nested; }
++    const std::shared_ptr<GenericLinearOperator> get_shared_nested() const { return nested; }
++
++    virtual void TestLinearOperator();
++
++  protected:
++
++    // Initialization
++    void init_layout(const GenericVector& x,
++		     const GenericVector& y,
++		     GenericLinearOperator* wrapper);
++
++  private:
++    // Pointer to backend wrapper
++    std::shared_ptr<GenericLinearOperator> nested;
++
++  };
++
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/WhaleMatrix.h b/dolfin/la/WhaleMatrix.h
+new file mode 100644
+index 0000000..1f3b723
+--- /dev/null
++++ b/dolfin/la/WhaleMatrix.h
+@@ -0,0 +1,229 @@
++#ifndef __WHALE_MATRIX_H
++#define __WHALE_MATRIX_H
++
++#ifdef HAS_WHALE
++
++#include <memory>
++#include "GenericMatrix.h"
++#include "WhaleObject.h"
++#include "WhaleFactory.h"
++#include "DefaultFactory.h"
++#include "WhaleExtensions.h"
++
++namespace dolfin
++{
++
++  /// This class provides the default DOLFIN matrix class,
++  /// based on the default DOLFIN linear algebra backend.
++
++  class WhaleMatrix : public GenericMatrix, public WhaleObject
++  {
++  public:
++
++    /// Create empty matrix
++    WhaleMatrix() : nested(factory_internal().create_matrix()) {}
++
++    /// Copy constructor
++    WhaleMatrix(const WhaleMatrix& A) : nested(A.internal_instance()->copy()) {}
++
++    /// Create a Vector from a GenericVetor
++    WhaleMatrix(const GenericMatrix& A) : nested(A.copy()) {}
++
++    /// Destructor
++    virtual ~WhaleMatrix() {}
++
++    //--- Implementation of the GenericTensor interface ---
++
++    /// Return true if vector is empty
++    virtual bool empty() const
++    { return internal_instance()->empty(); }
++
++    virtual MPI_Comm mpi_comm() const
++    { return internal_instance()->mpi_comm(); }
++
++    /// Initialize zero tensor using tensor layout
++    virtual void init(const TensorLayout& tensor_layout)
++    { internal_instance()->init(tensor_layout); }
++
++    /// Return size of given dimension
++    virtual std::size_t size(std::size_t dim) const
++    { return internal_instance()->size(dim); }
++
++    /// Return local ownership range
++    virtual std::pair<std::size_t, std::size_t>
++      local_range(std::size_t dim) const
++    { return internal_instance()->local_range(dim); }
++
++    /// Set all entries to zero and keep any sparse structure
++    virtual void zero()
++    { internal_instance()->zero(); }
++
++    /// Return number of non-zero entries in matrix (collective)
++    std::size_t nnz() const
++    { return internal_instance()->nnz(); }
++
++    /// Finalize assembly of tensor
++    virtual void apply(std::string mode)
++    { internal_instance()->apply(mode); }
++
++    /// Return informal string representation (pretty-print)
++    virtual std::string str(bool verbose) const
++    { return "<WhaleMatrix wrapper of " + internal_instance()->str(verbose) + ">"; }
++
++    //--- Implementation of the GenericMatrix interface ---
++
++    /// Return copy of matrix
++    virtual std::shared_ptr<GenericMatrix> copy() const
++    {
++      std::shared_ptr<GenericMatrix> A(new WhaleMatrix(*this));
++      return A;
++    }
++
++    virtual void init_vector(GenericVector& z, std::size_t dim) const
++    { internal_instance()->init_vector(z, dim); }
++
++    /// Get block of values
++    virtual void get(double* block,
++                     std::size_t m, const dolfin::la_index* rows,
++                     std::size_t n, const dolfin::la_index* cols) const
++    { internal_instance()->get(block, m, rows, n, cols); }
++
++    /// Set block of values
++    virtual void set(const double* block,
++                     std::size_t m, const dolfin::la_index* rows,
++                     std::size_t n, const dolfin::la_index* cols)
++    { internal_instance()->set(block, m, rows, n, cols); }
++
++    /// Set block of values using local indices
++    virtual void set_local(const double* block,
++                           std::size_t m, const dolfin::la_index* rows,
++                           std::size_t n, const dolfin::la_index* cols)
++    { internal_instance()->set_local(block,m,rows,n,cols); }
++
++    virtual void set_local(const double* block,
++                           const dolfin::la_index* num_rows,
++                           const dolfin::la_index * const * rows)
++    { internal_instance()->set_local(block,num_rows,rows); }
++
++    /// Add block of values
++    virtual void add(const double* block,
++                     std::size_t m, const dolfin::la_index* rows,
++                     std::size_t n, const dolfin::la_index* cols)
++    { internal_instance()->add(block, m, rows, n, cols); }
++
++    /// Add block of values using local indices
++    virtual void add_local(const double* block,
++                           std::size_t m, const dolfin::la_index* rows,
++                           std::size_t n, const dolfin::la_index* cols)
++    { internal_instance()->add_local(block,m,rows,n,cols); }
++
++    /// Add multiple of given matrix (AXPY operation)
++    virtual void axpy(double a, const GenericMatrix& A,
++                      bool same_nonzero_pattern)
++    {
++        const WhaleMatrix &W = A.down_cast<const WhaleMatrix>();
++        internal_instance()->axpy(a, *W.internal_instance(), same_nonzero_pattern);
++    }
++
++    /// Return norm of matrix
++    virtual double norm(std::string norm_type) const
++    { return internal_instance()->norm(norm_type); }
++
++    /// Get non-zero values of given row
++    virtual void getrow(std::size_t row, std::vector<std::size_t>& columns,
++                        std::vector<double>& values) const
++    { internal_instance()->getrow(row, columns, values); }
++
++    /// Set values for given row
++    virtual void setrow(std::size_t row,
++                        const std::vector<std::size_t>& columns,
++                        const std::vector<double>& values)
++    { internal_instance()->setrow(row, columns, values); }
++
++    /// Set given rows to zero
++    virtual void zero(std::size_t m, const dolfin::la_index* rows)
++    { internal_instance()->zero(m, rows); }
++
++    /// Set given rows (local row indices) to zero
++    virtual void zero_local(std::size_t m, const dolfin::la_index* rows)
++    { internal_instance()->zero_local(m,rows); }
++
++    /// Set given rows to identity matrix
++    virtual void ident(std::size_t m, const dolfin::la_index* rows)
++    { internal_instance()->ident(m, rows); }
++
++    /// Set given rows (local row indices) to identity matrix
++    virtual void ident_local(std::size_t m, const dolfin::la_index* rows)
++    { internal_instance()->ident_local(m,rows); }
++
++    // Matrix-vector product, y = Ax
++    virtual void mult(const GenericVector& x, GenericVector& y) const
++    { internal_instance()->mult(x, y); }
++
++    // Matrix-vector product, y = Ax
++    virtual void transpmult(const GenericVector& x, GenericVector& y) const
++    { internal_instance()->transpmult(x, y); }
++
++    /// Get diagonal of a matrix
++    virtual void get_diagonal(GenericVector& x) const
++    { internal_instance()->get_diagonal(x); }
++
++    /// Set diagonal of a matrix
++    virtual void set_diagonal(const GenericVector& x)
++    { internal_instance()->set_diagonal(x); }
++
++    /// Multiply matrix by given number
++    virtual const WhaleMatrix& operator*= (double a)
++    { *internal_instance()*=(a); return *this; }
++
++    /// Divide matrix by given number
++    virtual const WhaleMatrix& operator/= (double a)
++    { *internal_instance()/=(a); return *this; }
++
++    /// Assignment operator
++    virtual const GenericMatrix& operator= (const GenericMatrix& A)
++    {
++        const WhaleMatrix &W = A.down_cast<const WhaleMatrix>();
++        *internal_instance()=(*W.internal_instance());
++        return *this;
++    }
++
++    /// Test if matrix is symmetric
++    virtual bool is_symmetric(double tol) const
++    { return internal_instance()->is_symmetric(tol); }
++
++    /// Whale Extensions
++    virtual void TestMatrix();
++    virtual void TestLinearOperator();
++
++    //--- Special functions ---
++
++    /// Return linear algebra backend factory
++    virtual GenericLinearAlgebraFactory& factory() const
++    { return WhaleFactory::instance(); }
++
++    std::shared_ptr<GenericMatrix> get_shared_nested() { return nested; }
++    const std::shared_ptr<GenericMatrix> get_shared_nested() const { return nested; }
++
++  private:
++    GenericLinearAlgebraFactory& factory_internal() const
++    { return DefaultFactory::factory_internal(); }
++
++    /// Return concrete instance / unwrap (const version)
++    virtual const GenericMatrix* internal_instance() const
++    { return nested.get(); }
++
++    /// Return concrete instance / unwrap (non-const version)
++    virtual GenericMatrix* internal_instance()
++    { return nested.get(); }
++
++    // Pointer to concrete implementation
++    std::shared_ptr<GenericMatrix> nested;
++
++  };
++
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/WhaleObject.h b/dolfin/la/WhaleObject.h
+new file mode 100644
+index 0000000..ae30999
+--- /dev/null
++++ b/dolfin/la/WhaleObject.h
+@@ -0,0 +1,45 @@
++/*
++ * WhaleObject.h
++ *
++ *  Created on: Dec 27, 2013
++ *      Author: nmc
++ */
++
++#ifndef __WHALE_OBJECT_H_
++#define __WHALE_OBJECT_H_
++
++#ifdef HAS_WHALE
++
++#include <dolfin/common/SubSystemsManager.h>
++
++namespace dolfin {
++
++/// This class calls SubSystemsManager to initialise Whale.
++///
++/// All Whale objects must be derived from this class.
++
++class WhaleObject
++{
++public:
++
++  WhaleObject() { SubSystemsManager::init_whale(); }
++
++  virtual ~WhaleObject() {}
++
++  /// Print error message for Whale calls that return an error
++  static void whale_error(int error_code,
++                          std::string filename,
++                          std::string whale_function)
++  {
++    dolfin_error(filename,
++             "successfully call whale function '" + whale_function + "'",
++              "whale error code is: %d", error_code);
++  }
++
++};
++
++}
++
++#endif
++
++#endif /* __WHALE_OBJECT_H_ */
+diff --git a/dolfin/la/WhaleVector.h b/dolfin/la/WhaleVector.h
+new file mode 100644
+index 0000000..86d62e6
+--- /dev/null
++++ b/dolfin/la/WhaleVector.h
+@@ -0,0 +1,314 @@
++#ifndef __WHALE_VECTOR_H
++#define __WHALE_VECTOR_H
++
++#ifdef HAS_WHALE
++
++#include <memory>
++#include "GenericVector.h"
++#include "WhaleObject.h"
++#include "WhaleFactory.h"
++#include "WhaleExtensions.h"
++#include "DefaultFactory.h"
++
++#ifdef HAS_PETSC
++#include "PETScVector.h"
++#endif
++
++#ifdef HAS_TRILINOS
++#include "TpetraVector.h"
++#endif
++
++namespace dolfin
++{
++
++  template<typename T> class Array;
++
++  /// This class provides the default DOLFIN vector class,
++  /// based on the default DOLFIN linear algebra backend.
++
++  class WhaleVector : public GenericVector, public WhaleObject
++  {
++  public:
++
++    /// Create empty vector
++    WhaleVector() : nested(factory_internal().create_vector()) {}
++
++    /// Create vector of size N
++    explicit WhaleVector(MPI_Comm comm, std::size_t N) : nested(factory_internal().create_vector())
++    {
++        internal_instance()->init(comm,N);
++    }
++
++    /// Copy constructor
++    WhaleVector(const WhaleVector& x) : nested(x.nested->copy()) {}
++
++    /// Create a Vector from a GenericVetor
++    WhaleVector(const GenericVector& x) : nested(x.copy()) {}
++
++    ~WhaleVector() {}
++
++    //--- Implementation of the GenericTensor interface ---
++
++    /// Return copy of vector
++    virtual std::shared_ptr<GenericVector> copy() const
++    {
++      std::shared_ptr<GenericVector> x(new WhaleVector(*this));
++      return x;
++    }
++
++    virtual MPI_Comm mpi_comm() const
++    { return internal_instance()->mpi_comm(); }
++
++    /// Initialize vector to global size N
++    virtual void init(MPI_Comm comm, std::size_t N)
++    { internal_instance()->init(comm,N); }
++
++    /// Initialize vector with given ownership range
++    virtual void init(MPI_Comm comm,
++                      std::pair<std::size_t, std::size_t> range)
++    { internal_instance()->init(comm,range); }
++
++    /// Initialize vector with given ownership range and with ghost values
++    virtual void init(MPI_Comm comm,
++                      std::pair<std::size_t, std::size_t> range,
++                      const std::vector<std::size_t>& local_to_global_map,
++                      const std::vector<la_index>& ghost_indices)
++    { internal_instance()->init(comm,range,local_to_global_map,ghost_indices); }
++
++    /// Set all entries to zero and keep any sparse structure
++    virtual void zero()
++    { internal_instance()->zero(); }
++
++    /// Finalize assembly of tensor
++    virtual void apply(std::string mode)
++    { internal_instance()->apply(mode); }
++
++    /// Return informal string representation (pretty-print)
++    virtual std::string str(bool verbose) const
++    { return "<WhaleVector wrapper of " + internal_instance()->str(verbose) + ">"; }
++
++    //--- Implementation of the GenericVector interface ---
++
++    /// Return true if vector is empty
++    virtual bool empty() const
++    { return internal_instance()->empty(); }
++
++    /// Return size of vector
++    virtual std::size_t size() const
++    { return internal_instance()->size(); }
++
++    /// Return local size of vector
++    virtual std::size_t local_size() const
++    { return internal_instance()->local_size(); }
++
++    /// Return local ownership range of a vector
++    virtual std::pair<std::size_t, std::size_t> local_range() const
++    { return internal_instance()->local_range(); }
++
++    /// Determine whether global vector index is owned by this process
++    virtual bool owns_index(std::size_t i) const
++    { return internal_instance()->owns_index(i); }
++
++    /// Get block of values (values must all live on the local process)
++    /// Get block of values using global indices (all values must be
++    /// owned by local process, ghosts cannot be accessed)
++    virtual void get(double* block, std::size_t m,
++                     const dolfin::la_index* rows) const
++    { internal_instance()->get(block,m,rows); }
++
++    /// Get block of values using local indices
++    virtual void get_local(double* block, std::size_t m,
++                           const dolfin::la_index* rows) const
++    { internal_instance()->get_local(block,m,rows); }
++
++    /// Set block of values
++    virtual void set(const double* block, std::size_t m,
++                     const dolfin::la_index* rows)
++    { internal_instance()->set(block, m, rows); }
++
++    /// Set block of values using local indices
++    virtual void set_local(const double* block, std::size_t m,
++                           const dolfin::la_index* rows)
++    { internal_instance()->set_local(block,m,rows); }
++
++    /// Add block of values
++    virtual void add(const double* block, std::size_t m,
++                     const dolfin::la_index* rows)
++    { internal_instance()->add(block, m, rows); }
++
++    /// Add block of values using local indices
++    virtual void add_local(const double* block, std::size_t m,
++                           const dolfin::la_index* rows)
++    { internal_instance()->add_local(block,m,rows); }
++
++    /// Get all values on local process
++    virtual void get_local(std::vector<double>& values) const
++    { internal_instance()->get_local(values); }
++
++    /// Set all values on local process
++    virtual void set_local(const std::vector<double>& values)
++    { internal_instance()->set_local(values); }
++
++    /// Add values to each entry on local process
++    virtual void add_local(const Array<double>& values)
++    { internal_instance()->add_local(values); }
++
++    /// Gather entries into local vector x
++    virtual void gather(GenericVector& x,
++                        const std::vector<dolfin::la_index>& indices) const
++    {
++        WhaleVector &W = x.down_cast<WhaleVector>();
++        internal_instance()->gather(*W.internal_instance(), indices);
++    }
++
++    /// Gather entries into x
++    virtual void gather(std::vector<double>& x,
++                        const std::vector<dolfin::la_index>& indices) const
++    { internal_instance()->gather(x, indices); }
++
++    /// Gather all entries into x on process 0
++    virtual void gather_on_zero(std::vector<double>& x) const
++    { internal_instance()->gather_on_zero(x); }
++
++    /// Add multiple of given vector (AXPY operation)
++    virtual void axpy(double a, const GenericVector& x)
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        internal_instance()->axpy(a, *W.internal_instance());
++    }
++
++    /// Replace all entries in the vector by their absolute values
++    virtual void abs()
++    { internal_instance()->abs(); }
++
++    /// Return inner product with given vector
++    virtual double inner(const GenericVector& x) const
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        return internal_instance()->inner(*W.internal_instance());
++    }
++
++    /// Return norm of vector
++    virtual double norm(std::string norm_type) const
++    { return internal_instance()->norm(norm_type); }
++
++    /// Return minimum value of vector
++    virtual double min() const
++    { return internal_instance()->min(); }
++
++    /// Return maximum value of vector
++    virtual double max() const
++    { return internal_instance()->max(); }
++
++    /// Return sum of values of vector
++    virtual double sum() const
++    { return internal_instance()->sum(); }
++
++    virtual double sum(const Array<std::size_t>& rows) const
++    { return internal_instance()->sum(rows); }
++
++    /// Multiply vector by given number
++    virtual const WhaleVector& operator*= (double a)
++    { *internal_instance()*=(a); return *this; }
++
++    /// Multiply vector by another vector pointwise
++    virtual const WhaleVector& operator*= (const GenericVector& x)
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        *internal_instance()*=(*W.internal_instance());
++        return *this;
++    }
++
++    /// Divide vector by given number
++    virtual const WhaleVector& operator/= (double a)
++    { *this *= 1.0 / a; return *this; }
++
++    /// Add given vector
++    virtual const WhaleVector& operator+= (const GenericVector& x)
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        internal_instance()->axpy(1.0, *W.internal_instance());
++        return *this;
++    }
++
++    /// Add number to all components of a vector
++    virtual const GenericVector& operator+= (double a)
++    { *internal_instance()+=(a); return *this; }
++
++    /// Subtract given vector
++    virtual const WhaleVector& operator-= (const GenericVector& x)
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        internal_instance()->axpy(-1.0, *W.internal_instance());
++        return *this;
++    }
++
++    /// Subtract number from all components of a vector
++    virtual const GenericVector& operator-= (double a)
++    { *internal_instance()-=(a); return *this; }
++
++    /// Assignment operator
++    virtual const GenericVector& operator= (const GenericVector& x)
++    {
++        const WhaleVector &W = x.down_cast<const WhaleVector>();
++        *internal_instance()=(*W.internal_instance());
++        return *this;
++    }
++
++    /// Assignment operator
++    const WhaleVector& operator= (double a)
++    { *internal_instance()=(a); return *this; }
++
++    /// Update ghost values
++    virtual void update_ghost_values()
++    {
++
++#ifdef HAS_PETSC
++        if (PETScVector *V = dynamic_cast<PETScVector*>(internal_instance())) {
++            V->update_ghost_values();
++            return;
++        }
++#endif
++
++#ifdef HAS_TRILINOS
++        if (TpetraVector *V = dynamic_cast<TpetraVector*>(internal_instance())) {
++            V->update_ghost_values();
++            return;
++        }
++#endif
++    }
++
++    //--- Special functions ---
++
++    /// Return linear algebra backend factory
++    virtual GenericLinearAlgebraFactory& factory() const
++    { return WhaleFactory::instance(); }
++
++    std::shared_ptr<GenericVector> get_shared_nested() { return nested; }
++    const std::shared_ptr<GenericVector> get_shared_nested() const { return nested; }
++
++    /// Whale Extensions
++    virtual void TestVector();
++
++  private:
++    GenericLinearAlgebraFactory& factory_internal() const
++    { return DefaultFactory::factory_internal(); }
++
++    /// Return concrete instance / unwrap (const version)
++    virtual const GenericVector* internal_instance() const
++    { return nested.get(); }
++
++    /// Return concrete instance / unwrap (non-const version)
++    virtual GenericVector* internal_instance()
++    { return nested.get(); }
++
++    // Pointer to concrete implementation
++    std::shared_ptr<GenericVector> nested;
++
++  };
++
++}
++
++#endif
++
++#endif
+diff --git a/dolfin/la/dolfin_la.h b/dolfin/la/dolfin_la.h
+index 7adfa08..21cdb87 100644
+--- a/dolfin/la/dolfin_la.h
++++ b/dolfin/la/dolfin_la.h
+@@ -4,6 +4,7 @@
+ // DOLFIN la interface
+ 
+ // Note that the order is important!
++#include <dolfin/la/WhaleExtensions.h>
+ 
+ #include <dolfin/la/LinearAlgebraObject.h>
+ #include <dolfin/la/GenericLinearOperator.h>
+@@ -64,4 +65,12 @@
+ #include <dolfin/la/BlockMatrix.h>
+ #include <dolfin/la/LinearOperator.h>
+ 
++#include <dolfin/la/WhaleFactory.h>
++#include <dolfin/la/WhaleObject.h>
++#include <dolfin/la/WhaleVector.h>
++#include <dolfin/la/WhaleMatrix.h>
++#include <dolfin/la/WhaleLinearOperator.h>
++#include <dolfin/la/WhaleLUSolver.h>
++#include <dolfin/la/WhaleKrylovSolver.h>
++
+ #endif
+diff --git a/dolfin/parameter/GlobalParameters.cpp b/dolfin/parameter/GlobalParameters.cpp
+index e97865d..833cdc3 100644
+--- a/dolfin/parameter/GlobalParameters.cpp
++++ b/dolfin/parameter/GlobalParameters.cpp
+@@ -86,9 +86,12 @@ void GlobalParameters::parse(int argc, char* argv[])
+   // Extract DOLFIN and PETSc arguments
+   std::vector<std::string> args_dolfin;
+   std::vector<std::string> args_petsc;
++  std::vector<std::string> args_whale;
+   std::vector<std::string>* current = 0;
+   args_dolfin.push_back(argv[0]);
+   args_petsc.push_back(argv[0]);
++  args_whale.push_back(argv[0]);
++
+   for (int i = 1; i < argc; ++i)
+   {
+     std::string arg(argv[i]);
+@@ -100,6 +103,11 @@ void GlobalParameters::parse(int argc, char* argv[])
+         current = &args_petsc;
+         current->push_back("-" + arg.substr(8));
+       }
++      else if (arg.size() > 8 && arg.substr(0, 8) == "--whale.")
++      {
++        current = &args_whale;
++        current->push_back("-" + arg.substr(8));
++      }
+       else
+       {
+         current = &args_dolfin;
+@@ -130,6 +138,12 @@ void GlobalParameters::parse(int argc, char* argv[])
+     argv_petsc[i] = new char[args_petsc[i].size() + 1];
+     sprintf(argv_petsc[i], "%s", args_petsc[i].c_str());
+   }
++  char** argv_whale = new char*[args_whale.size()];
++  for (std::size_t i = 0; i < args_whale.size(); ++i)
++  {
++    argv_whale[i] = new char[args_whale[i].size() + 1];
++    sprintf(argv_whale[i], "%s", args_whale[i].c_str());
++  }
+ 
+   // Debugging
+   const bool debug = false;
+@@ -143,18 +157,26 @@ void GlobalParameters::parse(int argc, char* argv[])
+     for (std::size_t i = 0; i < args_petsc.size(); i++)
+       cout << " " << args_petsc[i];
+     cout << endl;
++    cout << "Whale args: ";
++    for (std::size_t i = 0; i < args_whale.size(); i++)
++      cout << " " << args_whale[i];
++    cout << endl;
+   }
+ 
+   // Parse DOLFIN and PETSc options
+   parse_common(args_dolfin.size(), argv_dolfin);
+   parse_petsc(args_petsc.size(), argv_petsc);
++  parse_whale(args_whale.size(), argv_whale);
+ 
+   // Cleanup
+   for (std::size_t i = 0; i < args_dolfin.size(); ++i)
+     delete [] argv_dolfin[i];
+   for (std::size_t i = 0; i < args_petsc.size(); ++i)
+     delete [] argv_petsc[i];
++  for (std::size_t i = 0; i < args_whale.size(); ++i)
++    delete [] argv_whale[i];
+   delete [] argv_dolfin;
+   delete [] argv_petsc;
++  delete [] argv_whale;
+ }
+ //-----------------------------------------------------------------------------
+diff --git a/dolfin/parameter/GlobalParameters.h b/dolfin/parameter/GlobalParameters.h
+index 1121ea1..76e92b5 100644
+--- a/dolfin/parameter/GlobalParameters.h
++++ b/dolfin/parameter/GlobalParameters.h
+@@ -50,6 +50,11 @@ namespace dolfin
+     {
+       Parameters p("dolfin");
+ 
++#ifdef HAS_WHALE
++      // New Code: whale
++      p.add("use_whale_backend",false);
++#endif
++
+       //-- General
+ 
+       // Prefix for timer tasks
+diff --git a/dolfin/parameter/Parameters.cpp b/dolfin/parameter/Parameters.cpp
+index 82840e4..a4f5746 100644
+--- a/dolfin/parameter/Parameters.cpp
++++ b/dolfin/parameter/Parameters.cpp
+@@ -548,6 +548,22 @@ void Parameters::parse_petsc(int argc, char* argv[])
+ 
+   SubSystemsManager::init_petsc(argc, argv);
+ }
++
++void Parameters::parse_whale(int argc, char* argv[])
++{
++  // Return if there are no arguments
++  if (argc <= 1)
++    return;
++
++  // Print options
++  cout << "Passing options to Whale:";
++  for (int i = 1; i < argc; i++)
++    cout << " " << argv[i];
++  cout << endl;
++
++  // Pass options to Whale
++  SubSystemsManager::init_whale(argc, argv);
++}
+ //-----------------------------------------------------------------------------
+ void Parameters::add_parameter_set_to_po(po::options_description& desc,
+                                          const Parameters &parameters,
+diff --git a/dolfin/parameter/Parameters.h b/dolfin/parameter/Parameters.h
+index 2116685..0221b14 100644
+--- a/dolfin/parameter/Parameters.h
++++ b/dolfin/parameter/Parameters.h
+@@ -231,6 +231,9 @@ namespace dolfin
+     /// Parse filtered options (only PETSc options)
+     void parse_petsc(int argc, char* argv[]);
+ 
++    /// Parse filtered options (only Whale options)
++    void parse_whale(int argc, char* argv[]);
++
+   private:
+ 
+     // Add all parameters as options to a boost::program_option instance
+diff --git a/dolfin/swig/shared_ptr_classes.i b/dolfin/swig/shared_ptr_classes.i
+index fba63eb..41c195c 100644
+--- a/dolfin/swig/shared_ptr_classes.i
++++ b/dolfin/swig/shared_ptr_classes.i
+@@ -149,6 +149,15 @@
+ %shared_ptr(dolfin::GlobalParameters)
+ 
+ // la
++#ifdef HAS_WHALE
++%shared_ptr(dolfin::GenericWhaleLinearOperator)
++%shared_ptr(dolfin::GenericWhaleMatrix)
++%shared_ptr(dolfin::GenericWhaleLinearSolver)
++%shared_ptr(dolfin::GenericWhaleLUSolver)
++%shared_ptr(dolfin::GenericWhaleKrylovSolver)
++%shared_ptr(dolfin::GenericWhaleVector)
++#endif
++
+ %shared_ptr(dolfin::GenericLinearOperator)
+ %shared_ptr(dolfin::GenericMatrix)
+ %shared_ptr(dolfin::GenericPreconditioner)
+@@ -180,6 +189,15 @@
+ %shared_ptr(dolfin::PETScUserPreconditioner)
+ #endif
+ 
++#ifdef HAS_WHALE
++%shared_ptr(dolfin::WhaleObject)
++%shared_ptr(dolfin::WhaleVector)
++%shared_ptr(dolfin::WhaleMatrix)
++%shared_ptr(dolfin::WhaleLinearOperator)
++%shared_ptr(dolfin::WhaleLUSolver)
++%shared_ptr(dolfin::WhaleKrylovSolver)
++#endif
++
+ #ifdef HAS_TRILINOS
+ %shared_ptr(dolfin::TpetraVector)
+ %shared_ptr(dolfin::TpetraMatrix)
