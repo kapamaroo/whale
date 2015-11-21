@@ -1,0 +1,21 @@
+Whale is a dynamic library designed to be used as a multipurpose linear algebra
+backend for FEniCS/DOLFIN. This is a prototype implementation that shows the
+structure of such a design.
+
+This package includes a patch for FEniCS/DOLFIN 1.6.0 that enables the use of
+the library from the mail FEniCS api.
+
+Prerequisites:
+        All FEniCS dependencies must be installed on the system, as well as all
+        the other core packages FEniCS provides, except for DOLFIN which we are
+        going to install.
+
+Installation:
+
+        Simply run: ./install.sh
+        The default installation directory is /opt/FEniCS.This can be changed
+        in the install.sh and Makefile files by changing the INSTALL_DIR in both
+        of them to point to the desired location.
+
+Test:
+        Run: python demo/demo_whale.py
