@@ -11,8 +11,11 @@ Prerequisites:
         going to install.
 
 Installation:
+        To build just the library for independent use run: make
 
-        Simply run: ./install.sh
+        To build, install and integrate the library into the FEniCS/DOLFIN api,
+        run: ./install.sh
+
         The default installation directory is /opt/FEniCS.This can be changed
         in the install.sh and Makefile files by changing the INSTALL_DIR in both
         of them to point to the desired location.
