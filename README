@@ -8,17 +8,19 @@ the library from the mail FEniCS api.
 Prerequisites:
         All FEniCS dependencies must be installed on the system, as well as all
         the other core packages FEniCS provides, except for DOLFIN which we are
-        going to install.
+        going to install. If DOLFIN is previously installed in the installation
+        directory, it will be overwritten.
 
 Installation:
-        To build just the library for independent use run: make
-
-        To build, install and integrate the library into the FEniCS/DOLFIN api,
-        run: ./install.sh
-
         The default installation directory is /opt/FEniCS.This can be changed
         in the install.sh and Makefile files by changing the INSTALL_DIR in both
         of them to point to the desired location.
+
+        To build just the library for independent use,
+        run: make
+
+        To build, install and integrate the library into the FEniCS/DOLFIN api,
+        run: ./install.sh
 
 Test:
         Run: python demo/demo_whale.py
